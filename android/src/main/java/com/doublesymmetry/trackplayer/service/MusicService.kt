@@ -3,6 +3,7 @@ package com.doublesymmetry.trackplayer.service
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.ServiceConnection
+import android.net.Uri
 import android.os.Binder
 import android.os.Build
 import android.os.Bundle
@@ -180,6 +181,9 @@ class MusicService : HeadlessJsTaskService() {
 
         val openAppIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            // Add the Uri data so apps can identify that it was a notification click
+            data = Uri.parse("trackplayer://notification.click")
+            action = Intent.ACTION_VIEW
         }
 
         val accentColor = BundleUtils.getIntOrNull(options, "color")
@@ -479,9 +483,6 @@ class MusicService : HeadlessJsTaskService() {
                             @Suppress("DEPRECATION")
                             stopForeground(true)
                         }
-
-                        stopSelf()
-                        exitProcess(0)
                     }
                 }
             }
@@ -594,8 +595,18 @@ class MusicService : HeadlessJsTaskService() {
         when (appKilledPlaybackBehavior) {
             AppKilledPlaybackBehavior.PAUSE_PLAYBACK -> player.pause()
             AppKilledPlaybackBehavior.STOP_PLAYBACK_AND_REMOVE_NOTIFICATION -> {
-                player.stop()
                 player.clear()
+                player.stop()
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
+
+                stopSelf()
+                exitProcess(0)
             }
             else -> {}
         }

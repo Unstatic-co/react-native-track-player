@@ -20,6 +20,8 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
     private let audioSessionController = AudioSessionController.shared
     private var shouldEmitProgressEvent: Bool = false
     private var shouldResumePlaybackAfterInterruptionEnds: Bool = false
+    private var forwardJumpInterval: NSNumber? = nil;
+    private var backwardJumpInterval: NSNumber? = nil;
 
     // MARK: - Lifecycle Methods
 
@@ -310,12 +312,15 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
             capabilitiesStr.append("togglePlayPause");
         }
 
+        forwardJumpInterval = options["forwardJumpInterval"] as? NSNumber ?? forwardJumpInterval
+        backwardJumpInterval = options["backwardJumpInterval"] as? NSNumber ?? backwardJumpInterval
+
         player.remoteCommands = capabilitiesStr
             .compactMap { Capability(rawValue: $0) }
             .map { capability in
                 capability.mapToPlayerCommand(
-                    forwardJumpInterval: options["forwardJumpInterval"] as? NSNumber,
-                    backwardJumpInterval: options["backwardJumpInterval"] as? NSNumber,
+                    forwardJumpInterval: forwardJumpInterval,
+                    backwardJumpInterval: backwardJumpInterval,
                     likeOptions: options["likeOptions"] as? [String: Any],
                     dislikeOptions: options["dislikeOptions"] as? [String: Any],
                     bookmarkOptions: options["bookmarkOptions"] as? [String: Any]
@@ -332,7 +337,7 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
     private func configureProgressUpdateEvent(interval: Double) {
         shouldEmitProgressEvent = interval > 0
         self.player.timeEventFrequency = shouldEmitProgressEvent
-            ? .custom(time: CMTime(seconds: interval, preferredTimescale: 1))
+            ? .custom(time: CMTime(seconds: interval, preferredTimescale: 1000))
             : .everySecond
     }
 
@@ -500,6 +505,7 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
         if (rejectWhenNotInitialized(reject: reject)) { return }
 
         player.stop()
+        player.clear()
         resolve(NSNull())
     }
 
@@ -518,6 +524,19 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
 
         player.pause()
         resolve(NSNull())
+    }
+
+    @objc(setPlayWhenReady:resolver:rejecter:)
+    public func setPlayWhenReady(playWhenReady: Bool, resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
+        if (rejectWhenNotInitialized(reject: reject)) { return }
+        player.playWhenReady = playWhenReady
+        resolve(NSNull())
+    }
+
+    @objc(getPlayWhenReady:rejecter:)
+    public func getPlayWhenReady(resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
+        if (rejectWhenNotInitialized(reject: reject)) { return }
+        resolve(player.playWhenReady)
     }
 
     @objc(stop:rejecter:)
@@ -697,8 +716,7 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
     @objc(getPlaybackState:rejecter:)
     public func getPlaybackState(resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
         if (rejectWhenNotInitialized(reject: reject)) { return }
-
-        resolve(getPlaybackStateBodyKeyValues())
+        resolve(getPlaybackStateBodyKeyValues(state: player.playerState))
     }
 
     @objc(updateMetadataForTrack:metadata:resolver:rejecter:)
@@ -762,9 +780,9 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
         }
     }
 
-    private func getPlaybackStateBodyKeyValues() -> Dictionary<String, Any> {
-        var body: Dictionary<String, Any> = ["state": State.fromPlayerState(state: player.playerState).rawValue]
-        if (player.playerState == AudioPlayerState.failed) {
+    private func getPlaybackStateBodyKeyValues(state: AudioPlayerState) -> Dictionary<String, Any> {
+        var body: Dictionary<String, Any> = ["state": State.fromPlayerState(state: state).rawValue]
+        if (state == AudioPlayerState.failed) {
             body["error"] = getPlaybackStateErrorKeyValues()
         }
         return body
@@ -773,7 +791,7 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
     // MARK: - QueuedAudioPlayer Event Handlers
 
     func handleAudioPlayerStateChange(state: AVPlayerWrapperState) {
-        emit(event: EventType.PlaybackState, body: getPlaybackStateBodyKeyValues())
+        emit(event: EventType.PlaybackState, body: getPlaybackStateBodyKeyValues(state: state))
     }
 
     func handleAudioPlayerMetadataReceived(metadata: [AVTimedMetadataGroup]) {
